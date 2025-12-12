@@ -4,6 +4,7 @@ import '../models/meal.dart';
 import '../widgets/meal_grid.dart';
 import 'meal_detail_screen.dart';
 import '../main.dart';
+import '../services/favorites_service.dart';
 
 class MealsScreen extends StatefulWidget {
   final String category;
@@ -19,6 +20,9 @@ class _MealsScreenState extends State<MealsScreen> with RouteAware {
   List<Meal> _filtered = [];
   bool _loading = true;
 
+  final FavoritesService favoritesService = FavoritesService();
+  Set<String> favoriteIds = {};
+
   final TextEditingController _controller = TextEditingController();
   String _query = '';
 
@@ -26,6 +30,7 @@ class _MealsScreenState extends State<MealsScreen> with RouteAware {
   void initState() {
     super.initState();
     load();
+    _loadFavorites();
   }
 
   @override
@@ -48,11 +53,25 @@ class _MealsScreenState extends State<MealsScreen> with RouteAware {
     _query = '';
     _filtered = _meals;
     setState(() {});
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    final ids = await favoritesService.loadFavorites();
+    if (!mounted) return;
+    setState(() => favoriteIds = ids);
+  }
+
+  Future<void> _toggleFavorite(String id) async {
+    await favoritesService.toggleFavorite(id);
+    await _loadFavorites();
   }
 
   Future<void> load() async {
     final data = await ApiService.fetchMeals(widget.category);
     _meals = data.map((e) => Meal.fromJson(e)).toList();
+
+    if (!mounted) return;
 
     setState(() {
       _filtered = _meals;
@@ -60,25 +79,25 @@ class _MealsScreenState extends State<MealsScreen> with RouteAware {
     });
   }
 
-  void filter(String text) async {
-    setState(() => _query = text);
+  void filter(String text) {
+    setState(() {
+      _query = text;
 
-    if (text.isEmpty) {
-      _filtered = _meals;
-      setState(() {});
-      return;
-    }
-
-    final results = await ApiService.searchMeals(text);
-    _filtered = results.map((e) => Meal.fromJson(e)).toList();
-    setState(() {});
+      if (text.isEmpty) {
+        _filtered = _meals;
+      } else {
+        _filtered = _meals
+            .where((m) => m.name.toLowerCase().contains(text.toLowerCase()))
+            .toList();
+      }
+    });
   }
 
   void openMeal(Meal meal) {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => MealDetailScreen(id: meal.id)),
-    );
+    ).then((_) => _loadFavorites());
   }
 
   @override
@@ -88,34 +107,36 @@ class _MealsScreenState extends State<MealsScreen> with RouteAware {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: _controller,
-              onChanged: filter,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: "Search meals...",
-                border: OutlineInputBorder(),
-              ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: TextField(
+                    controller: _controller,
+                    onChanged: filter,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: "Search meals...",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _filtered.isEmpty && _query.isNotEmpty
+                      ? const Center(
+                          child: Text(
+                            "No results found",
+                            style: TextStyle(fontSize: 18, color: Colors.grey),
+                          ),
+                        )
+                      : MealGrid(
+                          meals: _filtered,
+                          onTap: openMeal,
+                          favoriteIds: favoriteIds,
+                          onToggleFavorite: _toggleFavorite,
+                        ),
+                ),
+              ],
             ),
-          ),
-          Expanded(
-            child: _filtered.isEmpty && _query.isNotEmpty
-                ? const Center(
-              child: Text(
-                "No results found",
-                style: TextStyle(fontSize: 18, color: Colors.grey),
-              ),
-            )
-                : MealGrid(
-              meals: _filtered,
-              onTap: openMeal,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
